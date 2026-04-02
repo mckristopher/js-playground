@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Event Loop — Chunked Study Card</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #f5f5f2; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem 1rem; }
+  .w { width: 100%; max-width: 520px; }
+  .card { background: #fff; border: 0.5px solid rgba(0,0,0,0.12); border-radius: 12px; padding: 1.5rem; }
+  .card-num { font-size: 11px; font-weight: 500; color: #888; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .card-title { font-size: 22px; font-weight: 500; color: #1a1a1a; margin-bottom: 12px; }
+  .fact { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+  .fact-text { font-size: 15px; color: #1a1a1a; line-height: 1.6; }
+  .code { background: #f5f5f2; border-radius: 8px; padding: 12px 14px; font-family: ui-monospace, monospace; font-size: 12px; color: #1a1a1a; margin: 12px 0; white-space: pre; overflow-x: auto; line-height: 1.8; }
+  .warn { background: #FAEEDA; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #633806; margin-top: 12px; line-height: 1.6; }
+  .badge { display: inline-block; font-size: 11px; padding: 3px 10px; border-radius: 8px; margin-bottom: 12px; }
+  .nav { display: flex; gap: 8px; align-items: center; margin-bottom: 1rem; }
+  .nav button { padding: 7px 20px; border: 0.5px solid rgba(0,0,0,0.2); border-radius: 8px; background: #f5f5f2; font-size: 13px; color: #1a1a1a; cursor: pointer; }
+  .nav button:disabled { opacity: 0.35; cursor: default; }
+  .nav button:hover:not(:disabled) { background: #ebebeb; }
+  .dots { display: flex; gap: 6px; flex: 1; justify-content: center; }
+  .d { width: 8px; height: 8px; border-radius: 50%; background: #e0e0e0; border: 0.5px solid rgba(0,0,0,0.15); transition: background 0.2s; }
+  .d.on { background: #7F77DD; border-color: #7F77DD; }
+
+  @media (prefers-color-scheme: dark) {
+    body { background: #1a1a1a; }
+    .card { background: #242424; border-color: rgba(255,255,255,0.1); }
+    .card-num { color: #888; }
+    .card-title { color: #f0f0f0; }
+    .fact-text { color: #e0e0e0; }
+    .code { background: #1a1a1a; color: #e0e0e0; }
+    .nav button { background: #2e2e2e; border-color: rgba(255,255,255,0.15); color: #e0e0e0; }
+    .nav button:hover:not(:disabled) { background: #383838; }
+    .d { background: #383838; border-color: rgba(255,255,255,0.15); }
+  }
+</style>
+</head>
+<body>
+<div class="w">
+  <div class="nav">
+    <button id="bp" onclick="go(-1)" disabled>← Back</button>
+    <div class="dots" id="dots"></div>
+    <button id="bn" onclick="go(1)">Next →</button>
+  </div>
+  <div class="card" id="card"></div>
+</div>
+
+<script>
+const cards = [
+  {
+    num: "The big idea",
+    title: "JS can only do one thing at a time",
+    badge: null,
+    color: "#7F77DD",
+    facts: [
+      "There is one call stack. One thing runs at a time.",
+      "When that thing finishes, the event loop decides what runs next.",
+      "The order it checks: stack → microtasks → render → macrotask."
+    ],
+    code: null,
+    warn: null
+  },
+  {
+    num: "Queue 1",
+    title: "Microtasks",
+    badge: "Promise.then · queueMicrotask · MutationObserver",
+    color: "#1D9E75",
+    facts: [
+      "Run immediately after the current task finishes.",
+      "The whole queue drains before anything else happens.",
+      "If a microtask adds another microtask — that one also runs now."
+    ],
+    code: null,
+    warn: null
+  },
+  {
+    num: "Queue 2",
+    title: "Macrotasks",
+    badge: "setTimeout · setInterval · click events · I/O",
+    color: "#EF9F27",
+    facts: [
+      "Only one macrotask runs per event loop tick.",
+      "setTimeout(..., 0) still waits for all microtasks to finish first.",
+      "This is why Promise.then() always runs before setTimeout."
+    ],
+    code: `console.log('1');
+setTimeout(() => console.log('2'), 0);
+Promise.resolve().then(() => console.log('3'));
+console.log('4');
+
+// Output: 1 → 4 → 3 → 2`,
+    warn: null
+  },
+  {
+    num: "Queue 3",
+    title: "Rendering pipeline",
+    badge: "rAF → style recalc → layout → paint → composite",
+    color: "#D85A30",
+    facts: [
+      "Happens after microtasks, before the next macrotask.",
+      "Only runs if something actually changed visually.",
+      "Runs once per screen refresh — about every 16ms at 60fps."
+    ],
+    code: null,
+    warn: "Use requestAnimationFrame for animations — not setTimeout. rAF syncs to the screen refresh. setTimeout does not."
+  },
+  {
+    num: "The trap",
+    title: "Layout thrashing",
+    badge: null,
+    color: "#D85A30",
+    facts: [
+      "Reading offsetHeight or getBoundingClientRect forces the browser to flush its pending layout immediately.",
+      "If you read then write then read in a loop — the browser reflows on every iteration.",
+      "Fix: batch all reads first, then all writes."
+    ],
+    code: `// Bad — forces reflow every loop
+boxes.forEach(box => {
+  const h = box.offsetHeight;        // READ forces flush
+  box.style.height = h + 10 + 'px'; // WRITE invalidates
+});
+
+// Good — reads first, writes after
+const heights = boxes.map(b => b.offsetHeight);
+boxes.forEach((b,i) => b.style.height = heights[i]+10+'px');`,
+    warn: null
+  },
+  {
+    num: "Say this in the interview",
+    title: "One-liner answer",
+    badge: null,
+    color: "#7F77DD",
+    facts: [
+      "After every task, microtasks drain completely.",
+      "Then the browser renders if needed — once per frame.",
+      "Then the next macrotask runs. That's the full loop."
+    ],
+    code: null,
+    warn: "Your story: the 45% load improvement at CGI — mention eliminating forced reflows as one of the techniques."
+  }
+];
+
+let i = 0;
+
+function render() {
+  const c = cards[i];
+  document.getElementById('dots').innerHTML = cards.map((_,j) =>
+    `<div class="d ${j===i?'on':''}"></div>`).join('');
+  document.getElementById('bp').disabled = i === 0;
+  document.getElementById('bn').disabled = i === cards.length - 1;
+
+  const badgeHtml = c.badge
+    ? `<div class="badge" style="background:${c.color}22;color:${c.color}">${c.badge}</div>`
+    : '';
+
+  document.getElementById('card').innerHTML = `
+    <div class="card-num">${c.num} · ${i+1} of ${cards.length}</div>
+    <div class="card-title">${c.title}</div>
+    ${badgeHtml}
+    ${c.facts.map(f => `
+      <div class="fact">
+        <div class="dot" style="background:${c.color}"></div>
+        <div class="fact-text">${f}</div>
+      </div>`).join('')}
+    ${c.code ? `<div class="code">${c.code}</div>` : ''}
+    ${c.warn ? `<div class="warn">${c.warn}</div>` : ''}
+  `;
+}
+
+function go(dir) { i = Math.max(0, Math.min(cards.length-1, i+dir)); render(); }
+render();
+</script>
+</body>
+</html>
